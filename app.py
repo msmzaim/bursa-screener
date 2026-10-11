@@ -15,7 +15,6 @@ warnings.filterwarnings('ignore')
 st.set_page_config(page_title="Bursa Robo-Advisor", layout="wide")
 st.title("Bursa Robo-Advisor: Screener & Portfolio Monitor")
 
-# Initialize persistent session states
 if 'has_scanned' not in st.session_state:
     st.session_state['has_scanned'] = False
 if 'cached_setups' not in st.session_state:
@@ -135,7 +134,6 @@ def run_fast_market_scan(tickers):
             continue
 
     trade_setups = []
-    
     for ticker, latest, max_surge_ratio in candidates:
         try:
             stock = yf.Ticker(ticker)
@@ -176,9 +174,6 @@ def run_fast_market_scan(tickers):
 
 tab1, tab2, tab3 = st.tabs(["🔍 1. Market Screener", "🎯 2. Single Stock X-Ray", "📋 3. Active Portfolio"])
 
-# ==========================================
-# TAB 1: MARKET SCREENER
-# ==========================================
 with tab1:
     st.write(f"Tracking **{len(SHARIAH_TICKERS)}** Shariah-compliant Main & ACE market assets.")
     
@@ -186,7 +181,6 @@ with tab1:
     capital = st.sidebar.number_input("Capital per Trade (RM)", min_value=100, value=2000, step=100)
     
     st.sidebar.header("Robo-Advisor Parameters")
-    
     strict_fa = st.sidebar.checkbox("Strict Mode: Require Good Fundamentals", value=True)
     vol_surge_multiplier = st.sidebar.slider("Volume Surge (Jump)", 1.5, 3.0, 2.0)
     
@@ -251,7 +245,6 @@ with tab1:
         if filtered_setups:
             st.success(f"Found {len(filtered_setups)} High-Quality setup(s)! **Click any row to instantly load it into Tab 2.**")
             
-            # --- NEW: Clickable DataFrame ---
             df_display = pd.DataFrame(filtered_setups)
             selection_event = st.dataframe(
                 df_display,
@@ -286,14 +279,11 @@ with tab1:
         else:
             st.warning("No stocks passed your strict criteria today. Capital protected!")
 
-# ==========================================
-# TAB 2: SINGLE STOCK X-RAY & NEWS DIGEST
-# ==========================================
+
 with tab2:
     st.header("🎯 Single Stock X-Ray & News")
     st.caption("Search for any Bursa stock by abbreviation or full name (e.g. PCHEM, Inari, 5183, Tenaga).")
     
-    # Check if a stock was passed from Tab 1 table click
     pre_filled_search = ""
     if st.session_state.get('selected_stock'):
         pre_filled_search = st.session_state['selected_stock']
@@ -319,7 +309,6 @@ with tab2:
         deep_ticker = None
         display_name = None
         
-        # Determine if it's from Tab 1 dict match or external web search
         if web_query in STOCK_DICT:
             deep_ticker = STOCK_DICT[web_query]
             display_name = web_query
@@ -422,7 +411,6 @@ with tab2:
                     
                     st.divider()
                     
-                    # --- NEW: LIVE NEWS FEED & AI DIGEST ---
                     st.markdown("### 📰 Recent Headlines & News Feed")
                     try:
                         news_items = stock.news
@@ -431,12 +419,11 @@ with tab2:
                                 title = article.get('title', 'No Title')
                                 publisher = article.get('publisher', 'Unknown Source')
                                 link = article.get('link', '#')
-                                # Format UNIX timestamp to readable date
                                 pub_time = article.get('providerPublishTime')
                                 date_str = datetime.fromtimestamp(pub_time).strftime('%d %b %Y') if pub_time else ""
                                 
-                                st.markdown(f"**{idx+1}. [{title}]({link})**")
-                                st.caption(f"🗞️ *{publisher}* | 🕒 {date_str}")
+                                st.markdown(f"**{idx+1}. {title}**")
+                                st.caption(f"🕒 {date_str} | 🔗 **Reference:** [{publisher}]({link})")
                                 st.write("")
                         else:
                             st.info("No recent news found for this company on Yahoo Finance.")
@@ -476,9 +463,7 @@ with tab2:
             except Exception:
                 st.error("Error analyzing ticker. Please try again.")
 
-# ==========================================
-# TAB 3: ACTIVE PORTFOLIO MONITOR
-# ==========================================
+
 with tab3:
     st.header("📋 Active Monitored Portfolio")
     st.write("Track active positions added from the screener or manual search. Live P&L, stop-loss triggers, and take-profit targets update dynamically.")
