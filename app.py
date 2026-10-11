@@ -14,6 +14,11 @@ warnings.filterwarnings('ignore')
 st.set_page_config(page_title="Bursa Robo-Advisor", layout="wide")
 st.title("Bursa Robo-Advisor: Screener, Heatmap & Monitor")
 
+if 'scan_completed' not in st.session_state:
+    st.session_state['scan_completed'] = False
+    st.session_state['trade_setups'] = []
+    st.session_state['heatmap_data'] = []
+
 @st.cache_data
 def load_tickers():
     file_path = "shariah_list.csv"
@@ -46,7 +51,6 @@ def calculate_vpa_indicators(df):
     df['ATR'] = tr.rolling(window=14).mean()
     return df
 
-# Notice we removed vol_surge_mult from the inputs. This function now only fetches raw data!
 @st.cache_data(ttl=14400, show_spinner=False)
 def run_fast_market_scan(tickers):
     if not tickers:
@@ -70,7 +74,6 @@ def run_fast_market_scan(tickers):
                     
                 recent_5_days = df.iloc[-6:-1]
                 
-                # Calculate the MAXIMUM volume surge ratio over the last 5 days
                 max_surge_ratio = 0
                 for _, d in recent_5_days.iterrows():
                     if d['Spread'] > d['Avg_Spread'] * 1.2 and d['Close'] > d['Open'] and d['Vol_MA_20'] > 0:
@@ -118,7 +121,7 @@ def run_fast_market_scan(tickers):
                 "atr": float(latest['ATR']),
                 "fa_notes": fa_notes,
                 "fa_verdict": fa_verdict,
-                "max_surge_ratio": max_surge_ratio # We save this in memory!
+                "max_surge_ratio": max_surge_ratio
             })
         except Exception:
             continue
@@ -157,8 +160,8 @@ with tab1:
         filtered_setups = []
         multiplier = 2.0 if risk_reward == "1:2" else 3.0
         
-        for item in st.session_state.get('cached_setups', []):
-            # INSTANT FILTERING: Apply the slider rules on the fly!
+        # --- AUTOMATIC SORTING ADDED HERE ---
+        for item in sorted(st.session_state.get('cached_setups', []), key=lambda x: x['max_surge_ratio'], reverse=True):
             if item['max_surge_ratio'] < vol_surge_multiplier:
                 continue
             if strict_fa and not item['fa_notes']:
