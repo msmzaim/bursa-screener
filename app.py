@@ -23,19 +23,14 @@ if 'cached_setups' not in st.session_state:
 if 'my_portfolio' not in st.session_state:
     st.session_state['my_portfolio'] = []
 
+# Load Shariah tickers purely for background validation
 @st.cache_data
-def load_tickers_and_names():
+def load_shariah_tickers():
     file_path = "shariah_list.csv"
-    stock_dict = {}
+    tickers = set()
     if os.path.exists(file_path):
         df = pd.read_csv(file_path)
         
-        name_col = None
-        for col in df.columns:
-            if any(k in col.lower() for k in ['name', 'nama', 'company', 'syarikat', 'stock', 'saham', 'counter']):
-                name_col = col
-                break
-                
         ticker_col = None
         for col in df.columns:
             if any(k in col.lower() for k in ['ticker', 'code', 'symbol']):
@@ -55,23 +50,13 @@ def load_tickers_and_names():
                 yf_ticker = f"{t}.KL"
             else:
                 yf_ticker = t
-                t = t.replace('.KL', '')
                 
-            if yf_ticker.startswith("030"): 
-                continue 
+            if not yf_ticker.startswith("030"): 
+                tickers.add(yf_ticker)
                 
-            if name_col and pd.notna(row[name_col]):
-                name = str(row[name_col]).strip()
-                display = f"{t} - {name}"
-            else:
-                display = f"{t}"
-            
-            stock_dict[display] = yf_ticker
-            
-    return stock_dict
+    return list(tickers)
 
-STOCK_DICT = load_tickers_and_names()
-SHARIAH_TICKERS = list(STOCK_DICT.values())
+SHARIAH_TICKERS = load_shariah_tickers()
 
 def calculate_vpa_indicators(df):
     df['SMA_50'] = df['Close'].rolling(window=50).mean()
@@ -287,60 +272,47 @@ with tab1:
             st.warning("No stocks passed your strict criteria today. Capital protected!")
 
 # ==========================================
-# TAB 2: SINGLE STOCK X-RAY
+# TAB 2: SINGLE STOCK X-RAY (SMART WEB SEARCH)
 # ==========================================
 with tab2:
     st.header("🎯 Single Stock X-Ray")
-    st.caption("Use Live Autocomplete if your CSV has names, OR use Web Search to find any company instantly.")
+    st.caption("Search for any Bursa stock by abbreviation or full name (e.g. PCHEM, Inari, 5183, Tenaga).")
     
     c_tick, c_run = st.columns([3, 1])
     with c_tick:
-        selected_display = st.selectbox(
-            "1. Live Autocomplete (From your Shariah CSV):", 
-            options=list(STOCK_DICT.keys()), 
-            index=None, 
-            placeholder="Start typing to see suggestions..."
-        )
-        
         web_query = st.text_input(
-            "2. OR Web Search any name directly:", 
-            placeholder="e.g. Inari, Maybank (Press Enter or click Deep Dive)"
+            "Smart Web Search:", 
+            placeholder="Type here and press Enter..."
         )
         
     with c_run:
         st.write("")
         st.write("")
-        st.write("")
-        st.write("")
         run_deep = st.button("Deep Dive Analysis", use_container_width=True)
 
-    if run_deep:
+    if run_deep or web_query:
+        if not web_query:
+            st.warning("Please type a stock name or code first.")
+            st.stop()
+            
         deep_ticker = None
         display_name = None
         
-        if web_query:
-            with st.spinner(f"Web searching Yahoo Finance for '{web_query}'..."):
-                try:
-                    url = f"https://query2.finance.yahoo.com/v1/finance/search?q={web_query}"
-                    res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}).json()
-                    for q in res.get('quotes', []):
-                        symbol = q.get('symbol', '')
-                        if symbol.endswith('.KL'):
-                            deep_ticker = symbol
-                            display_name = f"{symbol.replace('.KL','')} - {q.get('shortname', symbol)}"
-                            break
-                except Exception:
-                    pass
-                
-            if not deep_ticker:
-                st.error(f"Could not find a Bursa stock matching '{web_query}' on Yahoo Finance.")
-                st.stop()
-                
-        elif selected_display:
-            deep_ticker = STOCK_DICT[selected_display]
-            display_name = selected_display
-        else:
-            st.warning("Please select or search a stock first.")
+        with st.spinner(f"Web searching Yahoo Finance for '{web_query}'..."):
+            try:
+                url = f"https://query2.finance.yahoo.com/v1/finance/search?q={web_query}"
+                res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}).json()
+                for q in res.get('quotes', []):
+                    symbol = q.get('symbol', '')
+                    if symbol.endswith('.KL'):
+                        deep_ticker = symbol
+                        display_name = f"{symbol.replace('.KL','')} - {q.get('shortname', symbol)}"
+                        break
+            except Exception:
+                pass
+            
+        if not deep_ticker:
+            st.error(f"Could not find a Bursa stock matching '{web_query}' on Yahoo Finance. Try a different spelling.")
             st.stop()
             
         with st.spinner(f"Analyzing {display_name}..."):
@@ -365,7 +337,12 @@ with tab2:
                     pe = info.get('trailingPE', 0)
                     roe = info.get('returnOnEquity', 0)
                     
-                    st.subheader(f"{display_name}")
+                    # --- NEW: Shariah Badge Verification ---
+                    is_shariah = deep_ticker in SHARIAH_TICKERS
+                    title_badge = "⭕ Shariah-Compliant" if is_shariah else "⚠️ Non-Shariah"
+                    title_color = "green" if is_shariah else "red"
+                    
+                    st.markdown(f"### {display_name} :{title_color}[**[{title_badge}]**]")
                     st.metric("Live Price", f"RM {latest['Close']:.3f}")
                     
                     st.markdown(f"**Quick Links:** [📈 TradingView Chart](https://www.tradingview.com/chart/?symbol=MYX%3A{bursa_code}) | [📰 Bursa News](https://www.bursamalaysia.com/trade/trading_resources/listing_directory/company-profile?stock_code={bursa_code})")
@@ -420,7 +397,8 @@ with tab2:
                     
                     st.divider()
                     
-                    st.markdown("### 📥 Add this to Portfolio Monitor (Tab 3)?")
+                    # Manual Portfolio Add
+                    st.markdown("### 📥 Add to Portfolio Monitor (Tab 3)?")
                     add_col1, add_col2, add_col3, add_col4 = st.columns(4)
                     with add_col1:
                         manual_entry = st.number_input("Target Entry (RM)", value=float(latest['Close']), step=0.05, key="m_entry")
