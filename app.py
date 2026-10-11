@@ -135,19 +135,41 @@ with tab1:
     st.write(f"Tracking **{len(SHARIAH_TICKERS)}** Shariah-compliant Main & ACE market assets.")
     
     st.sidebar.header("Rakuten Sizing")
-    capital = st.sidebar.number_input("Capital per Trade (RM)", min_value=100, value=2000, step=100)
+    capital = st.sidebar.number_input(
+        "Capital per Trade (RM)", 
+        min_value=100, 
+        value=2000, 
+        step=100,
+        help="The cash allocation earmarked for this trade. The robo-advisor divides this by the stock price × 100 to calculate the exact number of Rakuten board lots."
+    )
     
     st.sidebar.header("Robo-Advisor Parameters")
-    strict_fa = st.sidebar.checkbox("Strict Mode: Require Good Fundamentals", value=True)
-    vol_surge_multiplier = st.sidebar.slider("Volume Surge (Jump)", 1.5, 3.0, 2.0)
+    strict_fa = st.sidebar.checkbox(
+        "Strict Mode: Require Good Fundamentals", 
+        value=True,
+        help="When checked, filters out speculative penny stocks and non-profitable companies. Requires P/E ratio < 25 and Return on Equity (ROE) > 10%."
+    )
     
-    # --- NEW: Adjustable Exit Target Parameters ---
+    vol_surge_multiplier = st.sidebar.slider(
+        "Volume Surge (Jump)", 
+        1.5, 3.0, 2.0,
+        help="Wyckoff 'Jump Across the Creek' intensity. Measures how many times volume spiked above its 20-day average during an institutional breakout candle within the last 5 days. 2.0x indicates 200% normal daily volume."
+    )
+    
     st.sidebar.markdown("---")
     st.sidebar.header("Exit Strategy")
-    atr_multiplier = st.sidebar.slider("Stop Loss (ATR Multiplier)", 1.0, 3.0, 1.5, step=0.1)
-    st.sidebar.caption("1.0 = Tight Stop. 2.0+ = Loose Stop.")
+    atr_multiplier = st.sidebar.slider(
+        "Stop Loss (ATR Multiplier)", 
+        1.0, 3.0, 1.5, step=0.1,
+        help="Controls stop distance based on daily volatility (Average True Range). 1.0x gives a tight, aggressive stop. 1.5x–2.0x provides standard room to absorb intraday noise without early stop-outs."
+    )
     
-    risk_reward = st.sidebar.selectbox("Risk-to-Reward Ratio", ["1:1.5", "1:2", "1:3", "1:4", "1:5"], index=1)
+    risk_reward = st.sidebar.selectbox(
+        "Risk-to-Reward Ratio", 
+        ["1:1.5", "1:2", "1:3", "1:4", "1:5"], 
+        index=1,
+        help="Calculates Take Profit relative to your stop distance. E.g., at 1:2, if risking RM 0.05 downside, the target is placed RM 0.10 above your entry."
+    )
     rr_multiplier = float(risk_reward.split(":")[1])
 
     col_btn, col_info = st.columns([1, 4])
@@ -177,7 +199,6 @@ with tab1:
             cost_per_lot = entry * 100
             lots = math.floor(capital / cost_per_lot) if cost_per_lot > 0 else 0
             
-            # --- NEW: Dynamic Math applied here instantly ---
             stop_loss = max(0.01, entry - (atr_multiplier * item['atr']))
             take_profit = entry + (rr_multiplier * (entry - stop_loss))
             
@@ -221,9 +242,19 @@ with tab2:
     
     col1, col2 = st.columns(2)
     with col1:
-        my_ticker = st.text_input("Enter Ticker (e.g., 5183.KL)", "5183.KL")
+        my_ticker = st.text_input(
+            "Enter Ticker (e.g., 5183.KL)", 
+            "5183.KL",
+            help="Bursa 4-digit stock code followed by '.KL' (e.g., 5183.KL for Petronas Chemicals)."
+        )
     with col2:
-        my_buy_price = st.number_input("Your Entry Price (RM)", min_value=0.01, value=1.50, step=0.05)
+        my_buy_price = st.number_input(
+            "Your Entry Price (RM)", 
+            min_value=0.01, 
+            value=1.50, 
+            step=0.05,
+            help="The actual price per share filled on your Rakuten order to calculate real-time P&L."
+        )
         
     if st.button("Check Live Status"):
         try:
