@@ -163,9 +163,12 @@ with tab1:
 
     col_btn, col_info = st.columns([1, 4])
     with col_btn:
-        scan_button = st.button("⚡ Scan Market")
+        scan_button = st.button("⚡ Force Fresh Scan")
     
     if scan_button:
+        # NEW: This line wipes the memory so it actually re-downloads from Yahoo Finance!
+        run_fast_market_scan.clear()
+        
         with st.spinner("Running high-speed multi-threaded scan across Bursa..."):
             raw_setups, last_run = run_fast_market_scan(SHARIAH_TICKERS)
             st.session_state['cached_setups'] = raw_setups
@@ -226,7 +229,6 @@ with tab1:
                 hide_index=True 
             )
             
-            # Action Bar to send setup directly to Tab 2
             st.markdown("### 📥 Plan to Buy? Send to Portfolio Monitor")
             c_select, c_add = st.columns([3, 1])
             with c_select:
@@ -248,7 +250,6 @@ with tab1:
 
     st.divider()
 
-    # Individual Stock Analyzer placed directly under the screener
     st.subheader("🎯 Single Stock Deep Dive Analyzer")
     st.caption("Check any Bursa asset outside the screener to test trend, volume, and fundamentals.")
     
@@ -337,7 +338,6 @@ with tab1:
                         st.info("⏳ **NEUTRAL / WAITING:** Stock is in an uptrend, but missing a clear institutional volume surge.")
             except Exception:
                 st.error("Error analyzing ticker. Please check symbol.")
-
 
 # ==========================================
 # TAB 2: ACTIVE PORTFOLIO MONITOR
