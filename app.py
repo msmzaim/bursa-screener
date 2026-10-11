@@ -3,6 +3,7 @@ import yfinance as yf
 import pandas as pd
 import math
 import os
+import re
 import logging
 import warnings
 import requests
@@ -23,8 +24,6 @@ if 'my_portfolio' not in st.session_state:
     st.session_state['my_portfolio'] = []
 if 'selected_stock' not in st.session_state:
     st.session_state['selected_stock'] = None
-if 'table_selection_msg' not in st.session_state:
-    st.session_state['table_selection_msg'] = ""
 
 @st.cache_data
 def load_tickers_and_names():
@@ -256,9 +255,9 @@ with tab1:
             
             if len(selection_event.selection.rows) > 0:
                 selected_idx = selection_event.selection.rows[0]
-                clicked_stock_name = raw_candidates_for_action[selected_idx]['Company']
-                st.session_state['selected_stock'] = clicked_stock_name
-                st.success(f"✅ Loaded **{clicked_stock_name}** into memory! Go to **Tab 2** to see the Deep Dive and News.")
+                clicked_stock_ticker = raw_candidates_for_action[selected_idx]['ticker']
+                st.session_state['selected_stock'] = clicked_stock_ticker
+                st.success(f"✅ Loaded **{clicked_stock_ticker}**! Click **Tab 2** to view the Deep Dive and News.")
             
             st.markdown("### 📥 Plan to Buy? Send to Portfolio Monitor")
             c_select, c_add = st.columns([3, 1])
@@ -282,7 +281,7 @@ with tab1:
 
 with tab2:
     st.header("🎯 Single Stock X-Ray & News")
-    st.caption("Search for any Bursa stock by abbreviation or full name (e.g. PCHEM, Inari, 5183, Tenaga).")
+    st.caption("Search for any Bursa stock by abbreviation, 4-digit code, or company name (e.g. PCHEM, Inari, 8893, Tenaga).")
     
     pre_filled_search = ""
     if st.session_state.get('selected_stock'):
@@ -291,9 +290,9 @@ with tab2:
     c_tick, c_run = st.columns([3, 1])
     with c_tick:
         web_query = st.text_input(
-            "Smart Web Search / Passed from Tab 1:", 
+            "Search Bursa Stock:", 
             value=pre_filled_search,
-            placeholder="Type here and press Enter..."
+            placeholder="Type code or name and press Enter..."
         )
         
     with c_run:
@@ -308,14 +307,27 @@ with tab2:
             
         deep_ticker = None
         display_name = None
+        clean_query = web_query.strip()
         
-        if web_query in STOCK_DICT:
-            deep_ticker = STOCK_DICT[web_query]
-            display_name = web_query
+        # Smart Ticker Extractor: checks for 4-digit codes or .KL directly
+        kl_match = re.search(r'(\d{4})\.KL', clean_query, re.IGNORECASE)
+        digit_only_match = clean_query.isdigit() and len(clean_query) <= 4
+        digit_start_match = re.match(r'^(\d{3,4})\b', clean_query)
+        
+        if kl_match:
+            deep_ticker = f"{kl_match.group(1)}.KL"
+        elif digit_only_match:
+            deep_ticker = f"{clean_query.zfill(4)}.KL"
+        elif digit_start_match:
+            deep_ticker = f"{digit_start_match.group(1).zfill(4)}.KL"
+        elif clean_query in STOCK_DICT:
+            deep_ticker = STOCK_DICT[clean_query]
         else:
-            with st.spinner(f"Web searching Yahoo Finance for '{web_query}'..."):
+            # Fallback to Yahoo Search API for pure names/tickers like PCHEM, Inari, Maybank
+            clean_search_term = re.sub(r'\(.*?\)', '', clean_query).strip()
+            with st.spinner(f"Web searching Yahoo Finance for '{clean_search_term}'..."):
                 try:
-                    url = f"https://query2.finance.yahoo.com/v1/finance/search?q={web_query}"
+                    url = f"https://query2.finance.yahoo.com/v1/finance/search?q={clean_search_term}"
                     res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}).json()
                     for q in res.get('quotes', []):
                         symbol = q.get('symbol', '')
@@ -327,14 +339,18 @@ with tab2:
                     pass
             
         if not deep_ticker:
-            st.error(f"Could not find a Bursa stock matching '{web_query}' on Yahoo Finance. Try a different spelling.")
+            st.error(f"Could not find a Bursa stock matching '{web_query}' on Yahoo Finance. Try typing the 4-digit code directly.")
             st.stop()
             
-        with st.spinner(f"Analyzing charts, volume, and news for {display_name}..."):
+        with st.spinner(f"Analyzing charts, volume, and news for {deep_ticker}..."):
             try:
                 stock = yf.Ticker(deep_ticker)
                 info = stock.info or {}
                 bursa_code = deep_ticker.replace('.KL', '')
+                
+                if not display_name:
+                    company_name = info.get('longName', info.get('shortName', deep_ticker))
+                    display_name = f"{bursa_code} - {company_name}"
                 
                 df = stock.history(period="1y")
                 if not df.empty:
@@ -427,7 +443,7 @@ with tab2:
                                 st.write("")
                         else:
                             st.info("No recent news found for this company on Yahoo Finance.")
-                    except Exception as e:
+                    except Exception:
                         st.info("Could not retrieve news at this time.")
 
                     st.divider()
