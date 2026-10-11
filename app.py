@@ -7,6 +7,9 @@ import re
 import logging
 import warnings
 import requests
+import urllib.request
+import xml.etree.ElementTree as ET
+from urllib.parse import quote
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -309,7 +312,6 @@ with tab2:
         display_name = None
         clean_query = web_query.strip()
         
-        # Smart Ticker Extractor: checks for 4-digit codes or .KL directly
         kl_match = re.search(r'(\d{4})\.KL', clean_query, re.IGNORECASE)
         digit_only_match = clean_query.isdigit() and len(clean_query) <= 4
         digit_start_match = re.match(r'^(\d{3,4})\b', clean_query)
@@ -323,7 +325,6 @@ with tab2:
         elif clean_query in STOCK_DICT:
             deep_ticker = STOCK_DICT[clean_query]
         else:
-            # Fallback to Yahoo Search API for pure names/tickers like PCHEM, Inari, Maybank
             clean_search_term = re.sub(r'\(.*?\)', '', clean_query).strip()
             with st.spinner(f"Web searching Yahoo Finance for '{clean_search_term}'..."):
                 try:
@@ -427,24 +428,46 @@ with tab2:
                     
                     st.divider()
                     
+                    # --- UPGRADED: GOOGLE NEWS RSS ENGINE ---
                     st.markdown("### 📰 Recent Headlines & News Feed")
                     try:
-                        news_items = stock.news
-                        if news_items and len(news_items) > 0:
-                            for idx, article in enumerate(news_items[:5]):
-                                title = article.get('title', 'No Title')
-                                publisher = article.get('publisher', 'Unknown Source')
-                                link = article.get('link', '#')
-                                pub_time = article.get('providerPublishTime')
-                                date_str = datetime.fromtimestamp(pub_time).strftime('%d %b %Y') if pub_time else ""
+                        clean_comp_name = display_name.split('-')[-1].strip()
+                        search_term = quote(f"{clean_comp_name} Bursa Malaysia")
+                        rss_url = f"https://news.google.com/rss/search?q={search_term}&hl=en-MY&gl=MY&ceid=MY:en"
+                        
+                        req = urllib.request.Request(rss_url, headers={'User-Agent': 'Mozilla/5.0'})
+                        with urllib.request.urlopen(req, timeout=5) as response:
+                            xml_data = response.read()
+                            
+                        root = ET.fromstring(xml_data)
+                        articles = root.findall('.//item')
+                        
+                        if articles:
+                            for idx, item in enumerate(articles[:5]):
+                                raw_title = item.find('title').text if item.find('title') is not None else 'No Title'
+                                link = item.find('link').text if item.find('link') is not None else '#'
+                                pub_date = item.find('pubDate').text if item.find('pubDate') is not None else ''
+                                source = item.find('source').text if item.find('source') is not None else 'Unknown Source'
                                 
+                                if " - " in raw_title:
+                                    title = raw_title.rsplit(" - ", 1)[0]
+                                else:
+                                    title = raw_title
+                                    
+                                try:
+                                    dt = datetime.strptime(pub_date, "%a, %d %b %Y %H:%M:%S %Z")
+                                    date_str = dt.strftime('%d %b %Y, %H:%M')
+                                except:
+                                    date_str = pub_date.replace(" GMT", "")
+
                                 st.markdown(f"**{idx+1}. {title}**")
-                                st.caption(f"🕒 {date_str} | 🔗 **Reference:** [{publisher}]({link})")
+                                st.caption(f"🕒 {date_str} | 🔗 **Reference:** [{source}]({link})")
                                 st.write("")
                         else:
-                            st.info("No recent news found for this company on Yahoo Finance.")
-                    except Exception:
-                        st.info("Could not retrieve news at this time.")
+                            st.info(f"No recent news found for {clean_comp_name} on Google News.")
+                            
+                    except Exception as e:
+                        st.info("Could not retrieve local news feed at this time.")
 
                     st.divider()
                     
