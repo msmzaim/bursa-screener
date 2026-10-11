@@ -140,7 +140,15 @@ with tab1:
     st.sidebar.header("Robo-Advisor Parameters")
     strict_fa = st.sidebar.checkbox("Strict Mode: Require Good Fundamentals", value=True)
     vol_surge_multiplier = st.sidebar.slider("Volume Surge (Jump)", 1.5, 3.0, 2.0)
-    risk_reward = st.sidebar.selectbox("Risk-to-Reward Ratio", ["1:2", "1:3"])
+    
+    # --- NEW: Adjustable Exit Target Parameters ---
+    st.sidebar.markdown("---")
+    st.sidebar.header("Exit Strategy")
+    atr_multiplier = st.sidebar.slider("Stop Loss (ATR Multiplier)", 1.0, 3.0, 1.5, step=0.1)
+    st.sidebar.caption("1.0 = Tight Stop. 2.0+ = Loose Stop.")
+    
+    risk_reward = st.sidebar.selectbox("Risk-to-Reward Ratio", ["1:1.5", "1:2", "1:3", "1:4", "1:5"], index=1)
+    rr_multiplier = float(risk_reward.split(":")[1])
 
     col_btn, col_info = st.columns([1, 4])
     with col_btn:
@@ -158,9 +166,7 @@ with tab1:
         st.caption(f"🕒 Last scan completed: **{st.session_state.get('last_run', '')}** (Results cached for instant access)")
         
         filtered_setups = []
-        multiplier = 2.0 if risk_reward == "1:2" else 3.0
         
-        # --- AUTOMATIC SORTING ADDED HERE ---
         for item in sorted(st.session_state.get('cached_setups', []), key=lambda x: x['max_surge_ratio'], reverse=True):
             if item['max_surge_ratio'] < vol_surge_multiplier:
                 continue
@@ -170,8 +176,10 @@ with tab1:
             entry = item['entry']
             cost_per_lot = entry * 100
             lots = math.floor(capital / cost_per_lot) if cost_per_lot > 0 else 0
-            stop_loss = max(0.01, entry - (1.5 * item['atr']))
-            take_profit = entry + (multiplier * (entry - stop_loss))
+            
+            # --- NEW: Dynamic Math applied here instantly ---
+            stop_loss = max(0.01, entry - (atr_multiplier * item['atr']))
+            take_profit = entry + (rr_multiplier * (entry - stop_loss))
             
             filtered_setups.append({
                 "Company": item['Company'],
