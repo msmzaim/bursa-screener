@@ -84,14 +84,17 @@ def run_fast_market_scan(tickers):
                             max_surge_ratio = ratio
                 
                 if max_surge_ratio > 0 and (latest['Volume'] < latest['Vol_MA_20']) and (latest['Close_Pos'] > 0.5):
-                    candidates.append((ticker, latest, max_surge_ratio))
+                    # Calculate % change for the heatmap
+                    prev_close = df['Close'].iloc[-2]
+                    pct_chg = ((latest['Close'] - prev_close) / prev_close) * 100
+                    candidates.append((ticker, latest, max_surge_ratio, pct_chg))
         except Exception:
             continue
 
     trade_setups = []
     heatmap_data = []
     
-    for ticker, latest, max_surge_ratio in candidates:
+    for ticker, latest, max_surge_ratio, pct_chg in candidates:
         try:
             stock = yf.Ticker(ticker)
             info = stock.info or {}
@@ -103,7 +106,13 @@ def run_fast_market_scan(tickers):
             pe = info.get('trailingPE', 0)
             roe = info.get('returnOnEquity', 0)
             
-            heatmap_data.append({"Company": display_name, "Sector": sector, "Market Cap": mcap})
+            # --- NEW: Added % Change to Heatmap Data ---
+            heatmap_data.append({
+                "Company": display_name, 
+                "Sector": sector, 
+                "Market Cap": mcap,
+                "% Change": pct_chg
+            })
             
             fa_notes = []
             if pe > 0 and pe < 25:
@@ -203,10 +212,24 @@ with tab1:
             })
 
         if st.session_state.get('cached_heatmap'):
-            st.subheader("📊 Watchlist Sector Heatmap")
+            st.subheader("📊 Candidate Sector Heatmap")
             df_heat = pd.DataFrame(st.session_state['cached_heatmap'])
-            fig = px.treemap(df_heat, path=[px.Constant("Bursa Watchlist"), 'Sector', 'Company'], 
-                             values='Market Cap', color='Sector')
+            
+            # --- NEW: Plotly Red-to-Green Heatmap ---
+            fig = px.treemap(
+                df_heat, 
+                path=[px.Constant("Wyckoff Breakout Candidates"), 'Sector', 'Company'], 
+                values='Market Cap', 
+                color='% Change',
+                color_continuous_scale='RdYlGn',  # Built-in Red-Yellow-Green scale
+                color_continuous_midpoint=0       # Centers yellow at 0%
+            )
+            
+            # Cleans up the hover text
+            fig.update_traces(
+                hovertemplate='<b>%{label}</b><br>Market Cap: RM %{value:,.0f}<br>Daily Change: %{color:.2f}%'
+            )
+            
             st.plotly_chart(fig, width="stretch")
             
         if filtered_setups:
