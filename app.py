@@ -7,6 +7,7 @@ import os
 import logging
 import warnings
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 warnings.filterwarnings('ignore')
@@ -53,8 +54,9 @@ def calculate_vpa_indicators(df):
 
 @st.cache_data(ttl=14400, show_spinner=False)
 def run_fast_market_scan(tickers):
+    myt_zone = ZoneInfo("Asia/Kuala_Lumpur")
     if not tickers:
-        return [], [], datetime.now().strftime("%Y-%m-%d %H:%M")
+        return [], [], datetime.now(myt_zone).strftime("%Y-%m-%d %I:%M:%S %p (MYT)")
         
     batch_data = yf.download(tickers, period="1y", group_by='ticker', threads=True, progress=False)
     
@@ -126,7 +128,7 @@ def run_fast_market_scan(tickers):
         except Exception:
             continue
 
-    scan_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    scan_time = datetime.now(myt_zone).strftime("%Y-%m-%d %I:%M:%S %p (MYT)")
     return trade_setups, heatmap_data, scan_time
 
 tab1, tab2 = st.tabs(["🔍 1. Weekend Screener & Heatmap", "📈 2. Daily Portfolio Monitor"])
@@ -139,7 +141,6 @@ with tab1:
     
     st.sidebar.header("Robo-Advisor Parameters")
     
-    # Tap-friendly guide that opens without long-pressing
     with st.sidebar.expander("💡 Tap for Parameter Guide", expanded=False):
         st.markdown("""
         * **Capital per Trade:** Slices your allocated RM into exact 100-share board lots.
