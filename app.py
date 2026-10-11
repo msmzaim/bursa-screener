@@ -135,41 +135,27 @@ with tab1:
     st.write(f"Tracking **{len(SHARIAH_TICKERS)}** Shariah-compliant Main & ACE market assets.")
     
     st.sidebar.header("Rakuten Sizing")
-    capital = st.sidebar.number_input(
-        "Capital per Trade (RM)", 
-        min_value=100, 
-        value=2000, 
-        step=100,
-        help="The cash allocation earmarked for this trade. The robo-advisor divides this by the stock price × 100 to calculate the exact number of Rakuten board lots."
-    )
+    capital = st.sidebar.number_input("Capital per Trade (RM)", min_value=100, value=2000, step=100)
     
     st.sidebar.header("Robo-Advisor Parameters")
-    strict_fa = st.sidebar.checkbox(
-        "Strict Mode: Require Good Fundamentals", 
-        value=True,
-        help="When checked, filters out speculative penny stocks and non-profitable companies. Requires P/E ratio < 25 and Return on Equity (ROE) > 10%."
-    )
     
-    vol_surge_multiplier = st.sidebar.slider(
-        "Volume Surge (Jump)", 
-        1.5, 3.0, 2.0,
-        help="Wyckoff 'Jump Across the Creek' intensity. Measures how many times volume spiked above its 20-day average during an institutional breakout candle within the last 5 days. 2.0x indicates 200% normal daily volume."
-    )
+    # Tap-friendly guide that opens without long-pressing
+    with st.sidebar.expander("💡 Tap for Parameter Guide", expanded=False):
+        st.markdown("""
+        * **Capital per Trade:** Slices your allocated RM into exact 100-share board lots.
+        * **Strict Mode:** Filters out unprofitable penny stocks (requires P/E < 25 & ROE > 10%).
+        * **Volume Surge:** Wyckoff breakout power. 2.0x means volume was 200% above 20-day average.
+        * **Stop Loss (ATR):** Volatility-based buffer. 1.0 = tight; 1.5–2.0 = standard room to breathe.
+        * **Risk-to-Reward:** Target multiple relative to stop distance (1:2 = RM 0.10 upside for RM 0.05 risk).
+        """)
+
+    strict_fa = st.sidebar.checkbox("Strict Mode: Require Good Fundamentals", value=True)
+    vol_surge_multiplier = st.sidebar.slider("Volume Surge (Jump)", 1.5, 3.0, 2.0)
     
     st.sidebar.markdown("---")
     st.sidebar.header("Exit Strategy")
-    atr_multiplier = st.sidebar.slider(
-        "Stop Loss (ATR Multiplier)", 
-        1.0, 3.0, 1.5, step=0.1,
-        help="Controls stop distance based on daily volatility (Average True Range). 1.0x gives a tight, aggressive stop. 1.5x–2.0x provides standard room to absorb intraday noise without early stop-outs."
-    )
-    
-    risk_reward = st.sidebar.selectbox(
-        "Risk-to-Reward Ratio", 
-        ["1:1.5", "1:2", "1:3", "1:4", "1:5"], 
-        index=1,
-        help="Calculates Take Profit relative to your stop distance. E.g., at 1:2, if risking RM 0.05 downside, the target is placed RM 0.10 above your entry."
-    )
+    atr_multiplier = st.sidebar.slider("Stop Loss (ATR Multiplier)", 1.0, 3.0, 1.5, step=0.1)
+    risk_reward = st.sidebar.selectbox("Risk-to-Reward Ratio", ["1:1.5", "1:2", "1:3", "1:4", "1:5"], index=1)
     rr_multiplier = float(risk_reward.split(":")[1])
 
     col_btn, col_info = st.columns([1, 4])
@@ -242,19 +228,9 @@ with tab2:
     
     col1, col2 = st.columns(2)
     with col1:
-        my_ticker = st.text_input(
-            "Enter Ticker (e.g., 5183.KL)", 
-            "5183.KL",
-            help="Bursa 4-digit stock code followed by '.KL' (e.g., 5183.KL for Petronas Chemicals)."
-        )
+        my_ticker = st.text_input("Enter Ticker (e.g., 5183.KL)", "5183.KL")
     with col2:
-        my_buy_price = st.number_input(
-            "Your Entry Price (RM)", 
-            min_value=0.01, 
-            value=1.50, 
-            step=0.05,
-            help="The actual price per share filled on your Rakuten order to calculate real-time P&L."
-        )
+        my_buy_price = st.number_input("Your Entry Price (RM)", min_value=0.01, value=1.50, step=0.05)
         
     if st.button("Check Live Status"):
         try:
