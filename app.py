@@ -21,6 +21,8 @@ if 'cached_setups' not in st.session_state:
     st.session_state['cached_setups'] = []
 if 'my_portfolio' not in st.session_state:
     st.session_state['my_portfolio'] = []
+if 'selected_stock' not in st.session_state:
+    st.session_state['selected_stock'] = None
 
 @st.cache_data
 def load_tickers_and_names():
@@ -29,26 +31,27 @@ def load_tickers_and_names():
     if os.path.exists(file_path):
         df = pd.read_csv(file_path)
         
-        # Dynamically find the Name column
         name_col = None
         for col in df.columns:
             if col.lower() in ['name', 'company', 'company name', 'stock name', 'stock']:
                 name_col = col
                 break
                 
-        # Dynamically find the Ticker column
         ticker_col = None
         for col in df.columns:
-            if 'ticker' in col.lower() or 'code' in col.lower() or 'symbol' in col.lower():
+            if any(k in col.lower() for k in ['ticker', 'code', 'symbol']):
                 ticker_col = col
                 break
         if not ticker_col:
             ticker_col = df.columns[0]
             
-        for idx, row in df.iterrows():
+        for _, row in df.iterrows():
             t = str(row[ticker_col]).strip()
-            
-            # Format cleanly for Yahoo Finance
+            if not t or t == 'nan':
+                continue
+            if t.isdigit() and len(t) < 4:
+                t = t.zfill(4)
+                
             if not t.endswith('.KL'):
                 yf_ticker = f"{t}.KL"
             else:
@@ -56,9 +59,9 @@ def load_tickers_and_names():
                 t = t.replace('.KL', '')
                 
             if yf_ticker.startswith("030"): 
-                continue # Skip LEAP Market
+                continue 
                 
-            if name_col:
+            if name_col and pd.notna(row[name_col]):
                 name = str(row[name_col]).strip()
                 display = f"{t} - {name}"
             else:
@@ -68,7 +71,6 @@ def load_tickers_and_names():
             
     return stock_dict
 
-# Load the dictionary for the search bar
 STOCK_DICT = load_tickers_and_names()
 SHARIAH_TICKERS = list(STOCK_DICT.values())
 
@@ -169,10 +171,10 @@ def run_fast_market_scan(tickers):
     scan_time = datetime.now(myt_zone).strftime("%Y-%m-%d %I:%M:%S %p (MYT)")
     return trade_setups, scan_time
 
-tab1, tab2 = st.tabs(["🔍 1. Screener & Single Stock Analyzer", "📋 2. Active Portfolio Monitor"])
+tab1, tab2, tab3 = st.tabs(["🔍 1. Market Screener", "🎯 2. Single Stock X-Ray", "📋 3. Active Portfolio"])
 
 # ==========================================
-# TAB 1: SCREENER & INDIVIDUAL ANALYZER
+# TAB 1: MARKET SCREENER
 # ==========================================
 with tab1:
     st.write(f"Tracking **{len(SHARIAH_TICKERS)}** Shariah-compliant Main & ACE market assets.")
@@ -274,163 +276,177 @@ with tab1:
             with c_add:
                 st.write("")
                 st.write("")
-                if st.button("➕ Add to Tab 2", use_container_width=True):
+                if st.button("➕ Add to Portfolio (Tab 3)", use_container_width=True):
                     chosen = options[selected_choice]
                     existing_tickers = [p['ticker'] for p in st.session_state['my_portfolio']]
                     if chosen['ticker'] not in existing_tickers:
                         st.session_state['my_portfolio'].append(chosen)
-                        st.success(f"Added {chosen['Company']} to Tab 2!")
+                        st.success(f"Added {chosen['Company']} to Tab 3!")
                     else:
-                        st.info(f"{chosen['ticker']} is already monitored in Tab 2.")
+                        st.info(f"{chosen['ticker']} is already monitored in Tab 3.")
         else:
             st.warning("No stocks passed your strict criteria today. Capital protected!")
 
-    st.divider()
-
-    # --- UPGRADED: SEARCH BY NAME OR CODE ---
-    st.subheader("🎯 Single Stock Deep Dive Analyzer")
-    st.caption("Search any Bursa asset by name or code to instantly test its trend, volume, and fundamentals.")
-    
-    if not STOCK_DICT:
-        st.warning("Could not load stocks from shariah_list.csv.")
-    else:
-        c_tick, c_run = st.columns([3, 1])
-        with c_tick:
-            # This magically acts as a search bar! You can type names or codes.
-            selected_display = st.selectbox(
-                "Search Stock (Type Name or 4-Digit Code):", 
-                options=list(STOCK_DICT.keys())
-            )
-            deep_ticker = STOCK_DICT[selected_display]
-            
-        with c_run:
-            st.write("")
-            st.write("")
-            run_deep = st.button("Deep Dive Analysis", use_container_width=True)
-
-        if run_deep:
-            with st.spinner(f"Analyzing {selected_display}..."):
-                try:
-                    stock = yf.Ticker(deep_ticker)
-                    info = stock.info or {}
-                    company_name = info.get('longName', selected_display)
-                    
-                    # Because we use the dictionary, this bursa_code will ALWAYS be perfect for the web links
-                    bursa_code = deep_ticker.replace('.KL', '')
-                    
-                    df = stock.history(period="1y")
-                    if not df.empty:
-                        df = calculate_vpa_indicators(df)
-                        latest = df.iloc[-1]
-                        
-                        recent_5_days = df.iloc[-6:-1]
-                        max_surge_ratio = 0
-                        for _, d in recent_5_days.iterrows():
-                            if d['Spread'] > d['Avg_Spread'] * 1.2 and d['Close'] > d['Open'] and d['Vol_MA_20'] > 0:
-                                ratio = d['Volume'] / d['Vol_MA_20']
-                                if ratio > max_surge_ratio:
-                                    max_surge_ratio = ratio
-                                    
-                        pe = info.get('trailingPE', 0)
-                        roe = info.get('returnOnEquity', 0)
-                        
-                        st.subheader(f"{selected_display}")
-                        st.metric("Live Price", f"RM {latest['Close']:.3f}")
-                        
-                        # Links are now guaranteed to work!
-                        st.markdown(f"**Quick Links:** [📈 TradingView Chart](https://www.tradingview.com/chart/?symbol=MYX%3A{bursa_code}) | [📰 Bursa News](https://www.bursamalaysia.com/trade/trading_resources/listing_directory/company-profile?stock_code={bursa_code})")
-                        
-                        c1, c2, c3 = st.columns(3)
-                        with c1:
-                            st.markdown("#### 📈 Trend (SMA)")
-                            if latest['Close'] > latest['SMA_200'] and latest['SMA_50'] > latest['SMA_200']:
-                                st.success("🟢 Strong Uptrend")
-                            elif latest['Close'] > latest['SMA_200']:
-                                st.warning("🟡 Weak Uptrend")
-                            else:
-                                st.error("🔴 Downtrend")
-                                
-                        with c2:
-                            st.markdown("#### 🐋 Smart Money (VPA)")
-                            if max_surge_ratio >= 2.0:
-                                st.success(f"🟢 Buying ({max_surge_ratio:.1f}x Surge)")
-                            elif max_surge_ratio > 1.2:
-                                st.warning(f"🟡 Mild Surge ({max_surge_ratio:.1f}x)")
-                            else:
-                                st.error("🔴 Low Volume")
-                                
-                        with c3:
-                            st.markdown("#### 🏢 Fundamentals")
-                            fa_status = []
-                            if pe > 0 and pe < 25: fa_status.append(f"Fair P/E")
-                            if roe and roe > 0.10: fa_status.append(f"High ROE")
-                            
-                            if len(fa_status) == 2:
-                                st.success("🟢 Good")
-                            elif len(fa_status) == 1:
-                                st.warning("🟡 Average")
-                            else:
-                                st.error(f"🔴 Weak FA")
-                                
-                        st.divider()
-                        
-                        st.markdown("### 🤖 Robo-Advisor Verdict")
-                        rsi = latest['RSI']
-                        
-                        if rsi > 70:
-                            st.info("⚠️ **OVERBOUGHT:** RSI is above 70. Smart money distribution likely. Avoid new entries.")
-                        elif latest['Close'] < latest['SMA_200']:
-                            st.info("🚫 **AVOID:** Stock is below 200-day moving average. Fails core trend safety check.")
-                        elif max_surge_ratio >= 1.5 and latest['Volume'] < latest['Vol_MA_20'] and latest['Close_Pos'] > 0.5:
-                            st.info("✅ **WYCKOFF SETUP DETECTED:** Recent volume surge followed by a quiet pullback. Valid entry zone.")
-                        elif max_surge_ratio >= 1.5 and latest['Volume'] > latest['Vol_MA_20']:
-                            st.info("⏳ **WAIT FOR PULLBACK:** Volume is still elevated. Wait for a low-volume resting day before entering.")
-                        else:
-                            st.info("⏳ **NEUTRAL / WAITING:** Stock is in an uptrend, but missing a clear institutional volume surge.")
-                        
-                        st.divider()
-                        
-                        # --- NEW: MANUAL ADD TO PORTFOLIO ---
-                        st.markdown("### 📥 Add this Manual Search to Portfolio Monitor?")
-                        add_col1, add_col2, add_col3, add_col4 = st.columns(4)
-                        with add_col1:
-                            manual_entry = st.number_input("Target Entry (RM)", value=float(latest['Close']), step=0.05, key="m_entry")
-                        with add_col2:
-                            manual_sl = st.number_input("Stop Loss (RM)", value=float(latest['Close'] * 0.9), step=0.05, key="m_sl")
-                        with add_col3:
-                            manual_tp = st.number_input("Take Profit (RM)", value=float(latest['Close'] * 1.2), step=0.05, key="m_tp")
-                        with add_col4:
-                            st.write("")
-                            st.write("")
-                            if st.button("➕ Add to Tab 2", key="m_add"):
-                                manual_lots = math.floor(capital / (manual_entry * 100)) if manual_entry > 0 else 0
-                                new_trade = {
-                                    "ticker": deep_ticker,
-                                    "bursa_code": bursa_code,
-                                    "Company": selected_display,
-                                    "entry": manual_entry,
-                                    "lots": manual_lots,
-                                    "stop_loss": manual_sl,
-                                    "take_profit": manual_tp
-                                }
-                                existing_tickers = [p['ticker'] for p in st.session_state['my_portfolio']]
-                                if deep_ticker not in existing_tickers:
-                                    st.session_state['my_portfolio'].append(new_trade)
-                                    st.success(f"Added {selected_display} to Tab 2 Monitor!")
-                                else:
-                                    st.info(f"Already monitored in Tab 2.")
-                except Exception:
-                    st.error("Error analyzing ticker. Please try again.")
-
 # ==========================================
-# TAB 2: ACTIVE PORTFOLIO MONITOR
+# TAB 2: SINGLE STOCK X-RAY (AUTOTYPE SEARCH)
 # ==========================================
 with tab2:
+    st.header("🎯 Single Stock X-Ray")
+    st.caption("Type any stock name or 4-digit code. Suggestions will appear below like autotype.")
+    
+    search_query = st.text_input(
+        "Search Stock:", 
+        placeholder="Type e.g. Inari, 5183, QES, Hartalega...",
+        key="search_input_field"
+    )
+    
+    if search_query:
+        query_clean = search_query.strip().lower()
+        # Find matching stocks from dictionary
+        matched_stocks = [disp for disp in STOCK_DICT.keys() if query_clean in disp.lower()]
+        
+        # Check if direct 4-digit exact code entered
+        exact_code_matches = [disp for disp in STOCK_DICT.keys() if disp.startswith(query_clean + " -")]
+        if exact_code_matches:
+            st.session_state['selected_stock'] = exact_code_matches[0]
+            
+        if matched_stocks:
+            st.write("💡 **Suggestions (tap to select):**")
+            top_matches = matched_stocks[:4]
+            chip_cols = st.columns(len(top_matches))
+            for idx, match in enumerate(top_matches):
+                with chip_cols[idx]:
+                    if st.button(match, key=f"sug_btn_{idx}", use_container_width=True):
+                        st.session_state['selected_stock'] = match
+                        st.rerun()
+        else:
+            st.warning(f"No Shariah stocks found matching '{search_query}'.")
+            
+    # Render X-Ray diagnostics for selected stock
+    active_stock = st.session_state.get('selected_stock')
+    
+    if active_stock and active_stock in STOCK_DICT:
+        st.divider()
+        deep_ticker = STOCK_DICT[active_stock]
+        bursa_code = deep_ticker.replace('.KL', '')
+        
+        with st.spinner(f"Analyzing {active_stock}..."):
+            try:
+                stock = yf.Ticker(deep_ticker)
+                info = stock.info or {}
+                
+                df = stock.history(period="1y")
+                if not df.empty:
+                    df = calculate_vpa_indicators(df)
+                    latest = df.iloc[-1]
+                    
+                    recent_5_days = df.iloc[-6:-1]
+                    max_surge_ratio = 0
+                    for _, d in recent_5_days.iterrows():
+                        if d['Spread'] > d['Avg_Spread'] * 1.2 and d['Close'] > d['Open'] and d['Vol_MA_20'] > 0:
+                            ratio = d['Volume'] / d['Vol_MA_20']
+                            if ratio > max_surge_ratio:
+                                max_surge_ratio = ratio
+                                
+                    pe = info.get('trailingPE', 0)
+                    roe = info.get('returnOnEquity', 0)
+                    
+                    st.subheader(f"{active_stock}")
+                    st.metric("Live Price", f"RM {latest['Close']:.3f}")
+                    
+                    st.markdown(f"**Quick Links:** [📈 TradingView Chart](https://www.tradingview.com/chart/?symbol=MYX%3A{bursa_code}) | [📰 Bursa News](https://www.bursamalaysia.com/trade/trading_resources/listing_directory/company-profile?stock_code={bursa_code})")
+                    
+                    c1, c2, c3 = st.columns(3)
+                    with c1:
+                        st.markdown("#### 📈 Trend (SMA)")
+                        if latest['Close'] > latest['SMA_200'] and latest['SMA_50'] > latest['SMA_200']:
+                            st.success("🟢 Strong Uptrend")
+                        elif latest['Close'] > latest['SMA_200']:
+                            st.warning("🟡 Weak Uptrend")
+                        else:
+                            st.error("🔴 Downtrend")
+                            
+                    with c2:
+                        st.markdown("#### 🐋 Smart Money (VPA)")
+                        if max_surge_ratio >= 2.0:
+                            st.success(f"🟢 Buying ({max_surge_ratio:.1f}x Surge)")
+                        elif max_surge_ratio > 1.2:
+                            st.warning(f"🟡 Mild Surge ({max_surge_ratio:.1f}x)")
+                        else:
+                            st.error("🔴 Low Volume")
+                            
+                    with c3:
+                        st.markdown("#### 🏢 Fundamentals")
+                        fa_status = []
+                        if pe > 0 and pe < 25: fa_status.append(f"Fair P/E")
+                        if roe and roe > 0.10: fa_status.append(f"High ROE")
+                        
+                        if len(fa_status) == 2:
+                            st.success("🟢 Good")
+                        elif len(fa_status) == 1:
+                            st.warning("🟡 Average")
+                        else:
+                            st.error(f"🔴 Weak FA")
+                            
+                    st.divider()
+                    
+                    st.markdown("### 🤖 Robo-Advisor Verdict")
+                    rsi = latest['RSI']
+                    
+                    if rsi > 70:
+                        st.info("⚠️ **OVERBOUGHT:** RSI is above 70. Smart money distribution likely. Avoid new entries.")
+                    elif latest['Close'] < latest['SMA_200']:
+                        st.info("🚫 **AVOID:** Stock is below 200-day moving average. Fails core trend safety check.")
+                    elif max_surge_ratio >= 1.5 and latest['Volume'] < latest['Vol_MA_20'] and latest['Close_Pos'] > 0.5:
+                        st.info("✅ **WYCKOFF SETUP DETECTED:** Recent volume surge followed by a quiet pullback. Valid entry zone.")
+                    elif max_surge_ratio >= 1.5 and latest['Volume'] > latest['Vol_MA_20']:
+                        st.info("⏳ **WAIT FOR PULLBACK:** Volume is still elevated. Wait for a low-volume resting day before entering.")
+                    else:
+                        st.info("⏳ **NEUTRAL / WAITING:** Stock is in an uptrend, but missing a clear institutional volume surge.")
+                    
+                    st.divider()
+                    
+                    # Manual Portfolio Add
+                    st.markdown("### 📥 Add to Portfolio Monitor (Tab 3)?")
+                    add_col1, add_col2, add_col3, add_col4 = st.columns(4)
+                    with add_col1:
+                        manual_entry = st.number_input("Target Entry (RM)", value=float(latest['Close']), step=0.05, key="m_entry")
+                    with add_col2:
+                        manual_sl = st.number_input("Stop Loss (RM)", value=float(latest['Close'] * 0.9), step=0.05, key="m_sl")
+                    with add_col3:
+                        manual_tp = st.number_input("Take Profit (RM)", value=float(latest['Close'] * 1.2), step=0.05, key="m_tp")
+                    with add_col4:
+                        st.write("")
+                        st.write("")
+                        if st.button("➕ Add to Tab 3", key="m_add"):
+                            manual_lots = math.floor(capital / (manual_entry * 100)) if manual_entry > 0 else 0
+                            new_trade = {
+                                "ticker": deep_ticker,
+                                "bursa_code": bursa_code,
+                                "Company": active_stock,
+                                "entry": manual_entry,
+                                "lots": manual_lots,
+                                "stop_loss": manual_sl,
+                                "take_profit": manual_tp
+                            }
+                            existing_tickers = [p['ticker'] for p in st.session_state['my_portfolio']]
+                            if deep_ticker not in existing_tickers:
+                                st.session_state['my_portfolio'].append(new_trade)
+                                st.success(f"Added {active_stock} to Tab 3 Monitor!")
+                            else:
+                                st.info("Already monitored in Tab 3.")
+            except Exception:
+                st.error("Error analyzing ticker. Please try again.")
+
+# ==========================================
+# TAB 3: ACTIVE PORTFOLIO MONITOR
+# ==========================================
+with tab3:
     st.header("📋 Active Monitored Portfolio")
-    st.write("Track active positions added from the screener. Live P&L, stop-loss triggers, and take-profit targets update dynamically.")
+    st.write("Track active positions added from the screener or manual search. Live P&L, stop-loss triggers, and take-profit targets update dynamically.")
     
     if not st.session_state['my_portfolio']:
-        st.info("No active trades being monitored yet. Run a scan in Tab 1 and tap **➕ Add to Tab 2** to track them here.")
+        st.info("No active trades being monitored yet. Find stocks in Tab 1 or Tab 2 and add them to track here.")
     else:
         for idx, item in enumerate(st.session_state['my_portfolio']):
             ticker = item['ticker']
