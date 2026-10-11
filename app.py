@@ -5,6 +5,7 @@ import math
 import os
 import logging
 import warnings
+import requests
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -21,8 +22,6 @@ if 'cached_setups' not in st.session_state:
     st.session_state['cached_setups'] = []
 if 'my_portfolio' not in st.session_state:
     st.session_state['my_portfolio'] = []
-if 'selected_stock' not in st.session_state:
-    st.session_state['selected_stock'] = None
 
 @st.cache_data
 def load_tickers_and_names():
@@ -33,7 +32,7 @@ def load_tickers_and_names():
         
         name_col = None
         for col in df.columns:
-            if col.lower() in ['name', 'company', 'company name', 'stock name', 'stock']:
+            if any(k in col.lower() for k in ['name', 'nama', 'company', 'syarikat', 'stock', 'saham', 'counter']):
                 name_col = col
                 break
                 
@@ -288,52 +287,67 @@ with tab1:
             st.warning("No stocks passed your strict criteria today. Capital protected!")
 
 # ==========================================
-# TAB 2: SINGLE STOCK X-RAY (AUTOTYPE SEARCH)
+# TAB 2: SINGLE STOCK X-RAY
 # ==========================================
 with tab2:
     st.header("🎯 Single Stock X-Ray")
-    st.caption("Type any stock name or 4-digit code. Suggestions will appear below like autotype.")
+    st.caption("Use Live Autocomplete if your CSV has names, OR use Web Search to find any company instantly.")
     
-    search_query = st.text_input(
-        "Search Stock:", 
-        placeholder="Type e.g. Inari, 5183, QES, Hartalega...",
-        key="search_input_field"
-    )
-    
-    if search_query:
-        query_clean = search_query.strip().lower()
-        # Find matching stocks from dictionary
-        matched_stocks = [disp for disp in STOCK_DICT.keys() if query_clean in disp.lower()]
+    c_tick, c_run = st.columns([3, 1])
+    with c_tick:
+        selected_display = st.selectbox(
+            "1. Live Autocomplete (From your Shariah CSV):", 
+            options=list(STOCK_DICT.keys()), 
+            index=None, 
+            placeholder="Start typing to see suggestions..."
+        )
         
-        # Check if direct 4-digit exact code entered
-        exact_code_matches = [disp for disp in STOCK_DICT.keys() if disp.startswith(query_clean + " -")]
-        if exact_code_matches:
-            st.session_state['selected_stock'] = exact_code_matches[0]
-            
-        if matched_stocks:
-            st.write("💡 **Suggestions (tap to select):**")
-            top_matches = matched_stocks[:4]
-            chip_cols = st.columns(len(top_matches))
-            for idx, match in enumerate(top_matches):
-                with chip_cols[idx]:
-                    if st.button(match, key=f"sug_btn_{idx}", use_container_width=True):
-                        st.session_state['selected_stock'] = match
-                        st.rerun()
+        web_query = st.text_input(
+            "2. OR Web Search any name directly:", 
+            placeholder="e.g. Inari, Maybank (Press Enter or click Deep Dive)"
+        )
+        
+    with c_run:
+        st.write("")
+        st.write("")
+        st.write("")
+        st.write("")
+        run_deep = st.button("Deep Dive Analysis", use_container_width=True)
+
+    if run_deep:
+        deep_ticker = None
+        display_name = None
+        
+        if web_query:
+            with st.spinner(f"Web searching Yahoo Finance for '{web_query}'..."):
+                try:
+                    url = f"https://query2.finance.yahoo.com/v1/finance/search?q={web_query}"
+                    res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}).json()
+                    for q in res.get('quotes', []):
+                        symbol = q.get('symbol', '')
+                        if symbol.endswith('.KL'):
+                            deep_ticker = symbol
+                            display_name = f"{symbol.replace('.KL','')} - {q.get('shortname', symbol)}"
+                            break
+                except Exception:
+                    pass
+                
+            if not deep_ticker:
+                st.error(f"Could not find a Bursa stock matching '{web_query}' on Yahoo Finance.")
+                st.stop()
+                
+        elif selected_display:
+            deep_ticker = STOCK_DICT[selected_display]
+            display_name = selected_display
         else:
-            st.warning(f"No Shariah stocks found matching '{search_query}'.")
+            st.warning("Please select or search a stock first.")
+            st.stop()
             
-    # Render X-Ray diagnostics for selected stock
-    active_stock = st.session_state.get('selected_stock')
-    
-    if active_stock and active_stock in STOCK_DICT:
-        st.divider()
-        deep_ticker = STOCK_DICT[active_stock]
-        bursa_code = deep_ticker.replace('.KL', '')
-        
-        with st.spinner(f"Analyzing {active_stock}..."):
+        with st.spinner(f"Analyzing {display_name}..."):
             try:
                 stock = yf.Ticker(deep_ticker)
                 info = stock.info or {}
+                bursa_code = deep_ticker.replace('.KL', '')
                 
                 df = stock.history(period="1y")
                 if not df.empty:
@@ -351,7 +365,7 @@ with tab2:
                     pe = info.get('trailingPE', 0)
                     roe = info.get('returnOnEquity', 0)
                     
-                    st.subheader(f"{active_stock}")
+                    st.subheader(f"{display_name}")
                     st.metric("Live Price", f"RM {latest['Close']:.3f}")
                     
                     st.markdown(f"**Quick Links:** [📈 TradingView Chart](https://www.tradingview.com/chart/?symbol=MYX%3A{bursa_code}) | [📰 Bursa News](https://www.bursamalaysia.com/trade/trading_resources/listing_directory/company-profile?stock_code={bursa_code})")
@@ -406,8 +420,7 @@ with tab2:
                     
                     st.divider()
                     
-                    # Manual Portfolio Add
-                    st.markdown("### 📥 Add to Portfolio Monitor (Tab 3)?")
+                    st.markdown("### 📥 Add this to Portfolio Monitor (Tab 3)?")
                     add_col1, add_col2, add_col3, add_col4 = st.columns(4)
                     with add_col1:
                         manual_entry = st.number_input("Target Entry (RM)", value=float(latest['Close']), step=0.05, key="m_entry")
@@ -423,7 +436,7 @@ with tab2:
                             new_trade = {
                                 "ticker": deep_ticker,
                                 "bursa_code": bursa_code,
-                                "Company": active_stock,
+                                "Company": display_name,
                                 "entry": manual_entry,
                                 "lots": manual_lots,
                                 "stop_loss": manual_sl,
@@ -432,7 +445,7 @@ with tab2:
                             existing_tickers = [p['ticker'] for p in st.session_state['my_portfolio']]
                             if deep_ticker not in existing_tickers:
                                 st.session_state['my_portfolio'].append(new_trade)
-                                st.success(f"Added {active_stock} to Tab 3 Monitor!")
+                                st.success(f"Added {display_name} to Tab 3 Monitor!")
                             else:
                                 st.info("Already monitored in Tab 3.")
             except Exception:
