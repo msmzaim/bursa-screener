@@ -22,15 +22,24 @@ if 'cached_setups' not in st.session_state:
     st.session_state['cached_setups'] = []
 if 'my_portfolio' not in st.session_state:
     st.session_state['my_portfolio'] = []
+if 'selected_stock' not in st.session_state:
+    st.session_state['selected_stock'] = None
+if 'table_selection_msg' not in st.session_state:
+    st.session_state['table_selection_msg'] = ""
 
-# Load Shariah tickers purely for background validation
 @st.cache_data
-def load_shariah_tickers():
+def load_tickers_and_names():
     file_path = "shariah_list.csv"
-    tickers = set()
+    stock_dict = {}
     if os.path.exists(file_path):
         df = pd.read_csv(file_path)
         
+        name_col = None
+        for col in df.columns:
+            if any(k in col.lower() for k in ['name', 'nama', 'company', 'syarikat', 'stock', 'saham', 'counter']):
+                name_col = col
+                break
+                
         ticker_col = None
         for col in df.columns:
             if any(k in col.lower() for k in ['ticker', 'code', 'symbol']):
@@ -50,13 +59,23 @@ def load_shariah_tickers():
                 yf_ticker = f"{t}.KL"
             else:
                 yf_ticker = t
+                t = t.replace('.KL', '')
                 
-            if not yf_ticker.startswith("030"): 
-                tickers.add(yf_ticker)
+            if yf_ticker.startswith("030"): 
+                continue 
                 
-    return list(tickers)
+            if name_col and pd.notna(row[name_col]):
+                name = str(row[name_col]).strip()
+                display = f"{t} - {name}"
+            else:
+                display = f"{t}"
+            
+            stock_dict[display] = yf_ticker
+            
+    return stock_dict
 
-SHARIAH_TICKERS = load_shariah_tickers()
+STOCK_DICT = load_tickers_and_names()
+SHARIAH_TICKERS = list(STOCK_DICT.values())
 
 def calculate_vpa_indicators(df):
     df['SMA_50'] = df['Close'].rolling(window=50).mean()
@@ -168,15 +187,6 @@ with tab1:
     
     st.sidebar.header("Robo-Advisor Parameters")
     
-    with st.sidebar.expander("💡 Tap for Parameter Guide", expanded=False):
-        st.markdown("""
-        * **Capital per Trade:** Slices your allocated RM into exact 100-share board lots.
-        * **Strict Mode:** Filters out unprofitable penny stocks (requires P/E < 25 & ROE > 10%).
-        * **Volume Surge:** Wyckoff breakout power. 2.0x means volume was 200% above 20-day average.
-        * **Stop Loss (ATR):** Volatility-based buffer. 1.0 = tight; 1.5–2.0 = standard room to breathe.
-        * **Risk-to-Reward:** Target multiple relative to stop distance (1:2 = RM 0.10 upside for RM 0.05 risk).
-        """)
-
     strict_fa = st.sidebar.checkbox("Strict Mode: Require Good Fundamentals", value=True)
     vol_surge_multiplier = st.sidebar.slider("Volume Surge (Jump)", 1.5, 3.0, 2.0)
     
@@ -229,8 +239,6 @@ with tab1:
             
             filtered_setups.append({
                 "Company": item['Company'],
-                "Chart": f"https://www.tradingview.com/chart/?symbol=MYX%3A{item['bursa_code']}",
-                "News": f"https://www.bursamalaysia.com/trade/trading_resources/listing_directory/company-profile?stock_code={item['bursa_code']}",
                 "Sector": item['Sector'],
                 "Surge Jump": f"{item['max_surge_ratio']:.1f}x",
                 "Entry (RM)": f"{entry:.3f}",
@@ -241,16 +249,23 @@ with tab1:
             })
 
         if filtered_setups:
-            st.success(f"Found {len(filtered_setups)} High-Quality setup(s)!")
-            st.dataframe(
-                pd.DataFrame(filtered_setups),
-                column_config={
-                    "Chart": st.column_config.LinkColumn("TradingView", display_text="📈 Open Chart"),
-                    "News": st.column_config.LinkColumn("Bursa Data", display_text="📰 Read News")
-                },
+            st.success(f"Found {len(filtered_setups)} High-Quality setup(s)! **Click any row to instantly load it into Tab 2.**")
+            
+            # --- NEW: Clickable DataFrame ---
+            df_display = pd.DataFrame(filtered_setups)
+            selection_event = st.dataframe(
+                df_display,
+                on_select="rerun",
+                selection_mode="single-row",
                 use_container_width=True,
                 hide_index=True 
             )
+            
+            if len(selection_event.selection.rows) > 0:
+                selected_idx = selection_event.selection.rows[0]
+                clicked_stock_name = raw_candidates_for_action[selected_idx]['Company']
+                st.session_state['selected_stock'] = clicked_stock_name
+                st.success(f"✅ Loaded **{clicked_stock_name}** into memory! Go to **Tab 2** to see the Deep Dive and News.")
             
             st.markdown("### 📥 Plan to Buy? Send to Portfolio Monitor")
             c_select, c_add = st.columns([3, 1])
@@ -272,16 +287,22 @@ with tab1:
             st.warning("No stocks passed your strict criteria today. Capital protected!")
 
 # ==========================================
-# TAB 2: SINGLE STOCK X-RAY (SMART WEB SEARCH)
+# TAB 2: SINGLE STOCK X-RAY & NEWS DIGEST
 # ==========================================
 with tab2:
-    st.header("🎯 Single Stock X-Ray")
+    st.header("🎯 Single Stock X-Ray & News")
     st.caption("Search for any Bursa stock by abbreviation or full name (e.g. PCHEM, Inari, 5183, Tenaga).")
+    
+    # Check if a stock was passed from Tab 1 table click
+    pre_filled_search = ""
+    if st.session_state.get('selected_stock'):
+        pre_filled_search = st.session_state['selected_stock']
     
     c_tick, c_run = st.columns([3, 1])
     with c_tick:
         web_query = st.text_input(
-            "Smart Web Search:", 
+            "Smart Web Search / Passed from Tab 1:", 
+            value=pre_filled_search,
             placeholder="Type here and press Enter..."
         )
         
@@ -298,24 +319,29 @@ with tab2:
         deep_ticker = None
         display_name = None
         
-        with st.spinner(f"Web searching Yahoo Finance for '{web_query}'..."):
-            try:
-                url = f"https://query2.finance.yahoo.com/v1/finance/search?q={web_query}"
-                res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}).json()
-                for q in res.get('quotes', []):
-                    symbol = q.get('symbol', '')
-                    if symbol.endswith('.KL'):
-                        deep_ticker = symbol
-                        display_name = f"{symbol.replace('.KL','')} - {q.get('shortname', symbol)}"
-                        break
-            except Exception:
-                pass
+        # Determine if it's from Tab 1 dict match or external web search
+        if web_query in STOCK_DICT:
+            deep_ticker = STOCK_DICT[web_query]
+            display_name = web_query
+        else:
+            with st.spinner(f"Web searching Yahoo Finance for '{web_query}'..."):
+                try:
+                    url = f"https://query2.finance.yahoo.com/v1/finance/search?q={web_query}"
+                    res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}).json()
+                    for q in res.get('quotes', []):
+                        symbol = q.get('symbol', '')
+                        if symbol.endswith('.KL'):
+                            deep_ticker = symbol
+                            display_name = f"{symbol.replace('.KL','')} - {q.get('shortname', symbol)}"
+                            break
+                except Exception:
+                    pass
             
         if not deep_ticker:
             st.error(f"Could not find a Bursa stock matching '{web_query}' on Yahoo Finance. Try a different spelling.")
             st.stop()
             
-        with st.spinner(f"Analyzing {display_name}..."):
+        with st.spinner(f"Analyzing charts, volume, and news for {display_name}..."):
             try:
                 stock = yf.Ticker(deep_ticker)
                 info = stock.info or {}
@@ -337,7 +363,6 @@ with tab2:
                     pe = info.get('trailingPE', 0)
                     roe = info.get('returnOnEquity', 0)
                     
-                    # --- NEW: Shariah Badge Verification ---
                     is_shariah = deep_ticker in SHARIAH_TICKERS
                     title_badge = "⭕ Shariah-Compliant" if is_shariah else "⚠️ Non-Shariah"
                     title_color = "green" if is_shariah else "red"
@@ -397,7 +422,29 @@ with tab2:
                     
                     st.divider()
                     
-                    # Manual Portfolio Add
+                    # --- NEW: LIVE NEWS FEED & AI DIGEST ---
+                    st.markdown("### 📰 Recent Headlines & News Feed")
+                    try:
+                        news_items = stock.news
+                        if news_items and len(news_items) > 0:
+                            for idx, article in enumerate(news_items[:5]):
+                                title = article.get('title', 'No Title')
+                                publisher = article.get('publisher', 'Unknown Source')
+                                link = article.get('link', '#')
+                                # Format UNIX timestamp to readable date
+                                pub_time = article.get('providerPublishTime')
+                                date_str = datetime.fromtimestamp(pub_time).strftime('%d %b %Y') if pub_time else ""
+                                
+                                st.markdown(f"**{idx+1}. [{title}]({link})**")
+                                st.caption(f"🗞️ *{publisher}* | 🕒 {date_str}")
+                                st.write("")
+                        else:
+                            st.info("No recent news found for this company on Yahoo Finance.")
+                    except Exception as e:
+                        st.info("Could not retrieve news at this time.")
+
+                    st.divider()
+                    
                     st.markdown("### 📥 Add to Portfolio Monitor (Tab 3)?")
                     add_col1, add_col2, add_col3, add_col4 = st.columns(4)
                     with add_col1:
