@@ -97,6 +97,11 @@ def indicators(frame):
 
 def technical(frame, rules=Rules(), now=None):
     df = indicators(completed_bars(frame, now))
+    return technical_from_indicators(df, rules, now)
+
+
+def technical_from_indicators(df, rules=Rules(), now=None):
+    """Evaluate an already prepared historical prefix; never reads future rows."""
     if len(df) < 220:
         raise ValueError('Need at least 220 completed sessions for trend and indicator warm-up.')
     latest = df.iloc[-1]
